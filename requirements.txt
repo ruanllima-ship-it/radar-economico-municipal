@@ -37,3 +37,5 @@ urllib3==2.7.0
 uvicorn==0.52.4
 watchdog==6.0.0
 websockets==16.1.1
+beautifulsoup4==4.15.0
+wordcloud==1.9.6
