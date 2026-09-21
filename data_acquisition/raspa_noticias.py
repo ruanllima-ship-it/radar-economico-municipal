@@ -103,3 +103,14 @@ else:
         arquivo.write(linha["texto"] + "\n")
         arquivo.write("\n" + "=" * 60 + "\n\n")
     arquivo.close()
+
+    # resumo pra conferir
+    print("")
+    print("========== RESUMO ==========")
+    print("noticias salvas:", len(tabela))
+    print("")
+    for indice, linha in tabela.iterrows():
+        print(linha["data"], "|", linha["tipo"], "|", linha["qtd_paragrafos"], "par |", linha["qtd_palavras"], "palavras |", linha["titulo"])
+    print("")
+    print("comeco do texto da noticia mais recente:")
+    print(tabela.iloc[-1]["texto"][0:400])
