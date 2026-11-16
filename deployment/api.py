@@ -1,21 +1,41 @@
+import os
+
 import pandas as pd
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from starlette.exceptions import HTTPException as ExcecaoHTTPdoStarlette
 
-from deployment import modelo_llm
-from deployment.respostas import (
-    RespostaRaiz,
-    RespostaMunicipio,
-    RespostaRanking,
-    RespostaBrasil,
-    RespostaNoticias,
-    RespostaComparacao,
-    RespostaDoTextoProcessado,
-    RespostaDoModelo,
-    RespostaDeErro,
-)
+# o import de cima funciona quando a API e ligada da raiz do projeto, que e
+# o jeito recomendado. o de baixo cobre quem rodar de dentro da pasta
+# deployment, para a API nao deixar de subir so por causa da pasta de onde
+# o comando foi dado.
+try:
+    from deployment import modelo_llm
+    from deployment.respostas import (
+        RespostaRaiz,
+        RespostaMunicipio,
+        RespostaRanking,
+        RespostaBrasil,
+        RespostaNoticias,
+        RespostaComparacao,
+        RespostaDoTextoProcessado,
+        RespostaDoModelo,
+        RespostaDeErro,
+    )
+except ImportError:
+    import modelo_llm
+    from respostas import (
+        RespostaRaiz,
+        RespostaMunicipio,
+        RespostaRanking,
+        RespostaBrasil,
+        RespostaNoticias,
+        RespostaComparacao,
+        RespostaDoTextoProcessado,
+        RespostaDoModelo,
+        RespostaDeErro,
+    )
 
 # esta api entrega os indicadores do radar economico municipal para quem
 # quiser consultar de fora, sem abrir o painel. o proprio app do streamlit
@@ -28,10 +48,20 @@ app = FastAPI(
 )
 
 
+# os caminhos sao montados a partir de __file__, e nao da pasta de onde o
+# comando foi dado. assim a API acha os CSVs mesmo que seja ligada de outra
+# pasta. a raiz do projeto e a pasta que contem esta pasta deployment.
+pasta_deste_arquivo = os.path.dirname(os.path.abspath(__file__))
+raiz_do_projeto = os.path.dirname(pasta_deste_arquivo)
+
+caminho_indicadores = os.path.join(raiz_do_projeto, "data_acquisition", "cleaned_data", "indicadores_municipios.csv")
+caminho_resumo = os.path.join(raiz_do_projeto, "data_acquisition", "cleaned_data", "resumo_brasil.csv")
+caminho_noticias = os.path.join(raiz_do_projeto, "data", "noticias_ibge.csv")
+
 # os arquivos sao lidos uma vez so, quando a api liga
-indicadores = pd.read_csv("data_acquisition/cleaned_data/indicadores_municipios.csv")
-resumo = pd.read_csv("data_acquisition/cleaned_data/resumo_brasil.csv")
-noticias = pd.read_csv("data/noticias_ibge.csv")
+indicadores = pd.read_csv(caminho_indicadores)
+resumo = pd.read_csv(caminho_resumo)
+noticias = pd.read_csv(caminho_noticias)
 
 
 # formato do pedido da rota de comparacao

@@ -1,7 +1,18 @@
+import os
 import time
 import pandas as pd
 import streamlit as st
 from wordcloud import WordCloud
+
+# os caminhos dos arquivos sao montados a partir de __file__, e nao da pasta
+# de onde o comando foi dado, para o painel achar os dados de qualquer lugar
+pasta_deste_arquivo = os.path.dirname(os.path.abspath(__file__))
+raiz_do_projeto = os.path.dirname(pasta_deste_arquivo)
+
+
+def caminho(*pedacos):
+    return os.path.join(raiz_do_projeto, *pedacos)
+
 
 # este arquivo guarda o que todas as paginas usam: a leitura dos dados
 # com cache, as funcoes de formatacao e os filtros da barra lateral.
@@ -15,25 +26,25 @@ from wordcloud import WordCloud
 # =========================================================
 @st.cache_data
 def carregar_indicadores():
-    tabela = pd.read_csv("data_acquisition/cleaned_data/indicadores_municipios.csv")
+    tabela = pd.read_csv(caminho("data_acquisition", "cleaned_data", "indicadores_municipios.csv"))
     return tabela
 
 
 @st.cache_data
 def carregar_resumo():
-    tabela = pd.read_csv("data_acquisition/cleaned_data/resumo_brasil.csv")
+    tabela = pd.read_csv(caminho("data_acquisition", "cleaned_data", "resumo_brasil.csv"))
     return tabela
 
 
 @st.cache_data
 def carregar_noticias():
-    tabela = pd.read_csv("data/noticias_ibge.csv")
+    tabela = pd.read_csv(caminho("data", "noticias_ibge.csv"))
     return tabela
 
 
 @st.cache_data
 def carregar_populacao_2024():
-    tabela = pd.read_csv("data_acquisition/raw_data/populacao_municipios_2010_2024.csv")
+    tabela = pd.read_csv(caminho("data_acquisition", "raw_data", "populacao_municipios_2010_2024.csv"))
     tabela = tabela[tabela["ano"] == 2024]
     tabela = tabela[["codigo", "populacao"]]
     tabela = tabela.rename(columns={"populacao": "populacao_estimada_2024"})
