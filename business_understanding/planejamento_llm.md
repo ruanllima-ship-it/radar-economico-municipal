@@ -59,3 +59,72 @@ O segundo risco é o custo e o tempo de resposta, já que são 5.570 municípios
 O terceiro risco é a chave de acesso ao modelo vazar no repositório público. A mitigação é guardar a chave fora do código, em variável de ambiente ou no arquivo de segredos do Streamlit, com o caminho já incluído no .gitignore.
 
 O quarto risco é o diagnóstico soar como conselho técnico definitivo sobre a economia de uma cidade. A mitigação é um aviso visível de que o texto é gerado automaticamente a partir dos dados do IBGE, serve como apoio à leitura e não substitui análise técnica.
+
+---
+
+## 7. O que foi efetivamente entregue no TP4, e o que mudou do plano
+
+Esta seção foi escrita depois da implementação, para registrar a diferença entre o
+que foi planejado aqui, no TP3, e o que foi entregue no TP4.
+
+### A prioridade foi invertida, e por um motivo
+
+O plano original, na seção 4, previa o diagnóstico do município como primeira
+aplicação e o resumo das notícias como segunda. A ordem foi invertida: o resumo
+automático foi implementado, e o diagnóstico ficou para a última etapa do projeto.
+
+O motivo é uma restrição que só ficou clara quando o enunciado do TP4 foi divulgado:
+o modelo precisa rodar **localmente**, baixado da HuggingFace. Isso muda tudo o que
+estava suposto nesta seção, que foi escrita pensando em um modelo grande acessado por
+uma API na nuvem.
+
+Gerar um diagnóstico em três ou quatro parágrafos, combinando sete indicadores com
+série histórica e comparação com o estado, é tarefa de modelo grande. O modelo que
+cabe nesta máquina tem 223 milhões de parâmetros, e o experimento registrado em
+`modeling/escolha_do_modelo.md` mostrou que ele inventa informação justamente quando
+é forçado a escrever mais do que tem para dizer. Insistir no diagnóstico seria entregar
+texto bonito e errado sobre a economia de municípios reais — exatamente o primeiro
+risco listado na seção 6 deste documento.
+
+O resumo, ao contrário, é a tarefa para a qual o modelo escolhido foi treinado, e
+aproveita as 19.996 palavras coletadas com Selenium no TP3, que até então só
+alimentavam a nuvem de palavras.
+
+### O que foi entregue
+
+A rota `POST /processar_texto` na API recebe um texto em português e devolve o resumo
+gerado pelo modelo local, junto com o tipo de análise, o modelo usado, o dispositivo,
+o tempo de geração e quanto do texto o modelo conseguiu ler. A rota `GET /modelo`
+informa se o modelo já está carregado, sem carregá-lo.
+
+No painel, a página **Resumo com IA** permite resumir qualquer uma das 15 matérias do
+IBGE ou um texto colado pelo usuário, e mostra o resumo do modelo ao lado do resumo
+publicado pelo próprio IBGE, para comparação direta.
+
+### As mitigações de risco previstas na seção 6, uma a uma
+
+O risco de **inventar número** foi tratado de duas formas. O modelo nunca calcula nada:
+ele recebe um texto pronto e só resume. E a configuração de geração foi escolhida por
+experimento, entre quatro alternativas, justamente pelo critério de não inventar
+conteúdo — o registro está em `modeling/escolha_do_modelo.md`, seção 7.
+
+O risco de **custo e tempo de resposta** foi tratado com carregamento preguiçoso: o
+modelo só é carregado quando alguém pede um resumo, e o resumo só é gerado quando o
+usuário clica no botão. Nunca em lote.
+
+O risco de **vazamento de chave de API** deixou de existir. Como o modelo roda
+localmente, não há chave, conta nem serviço externo. Depois do download inicial, o
+projeto funciona sem internet.
+
+O risco de o texto **soar como parecer técnico definitivo** foi tratado com um aviso
+fixo e visível no alto da página, informando que os resumos são gerados por máquina e
+que o texto original deve ser consultado antes de usar qualquer número. O link da
+matéria original aparece ao lado de cada resumo.
+
+### O que continua para a última etapa
+
+As aplicações 3.1 (diagnóstico do município), 3.3 (perguntas e respostas) e 3.4
+(classificação de sentimento) seguem previstas. A rota `/processar_texto` já nasceu
+preparada para isso: ela recebe um campo `tipo_analise`, hoje com um único valor
+aceito, e recusa os demais com HTTP 400. Acrescentar uma análise nova é acrescentar um
+valor a essa lista, sem mudar o formato da resposta.

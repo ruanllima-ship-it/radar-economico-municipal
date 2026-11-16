@@ -1,6 +1,21 @@
 import pandas as pd
 from fastapi import FastAPI, HTTPException, Query
-from pydantic import BaseModel
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
+from starlette.exceptions import HTTPException as ExcecaoHTTPdoStarlette
+
+from deployment import modelo_llm
+from deployment.respostas import (
+    RespostaRaiz,
+    RespostaMunicipio,
+    RespostaRanking,
+    RespostaBrasil,
+    RespostaNoticias,
+    RespostaComparacao,
+    RespostaDoTextoProcessado,
+    RespostaDoModelo,
+    RespostaDeErro,
+)
 
 # esta api entrega os indicadores do radar economico municipal para quem
 # quiser consultar de fora, sem abrir o painel. o proprio app do streamlit
@@ -9,7 +24,7 @@ from pydantic import BaseModel
 app = FastAPI(
     title="API do Radar Econômico Municipal",
     description="Consulta dos indicadores de concentração econômica dos municípios brasileiros, calculados a partir do PIB dos Municípios do IBGE (tabela 5938 do SIDRA) e das notícias da Agência de Notícias do IBGE.",
-    version="1.0",
+    version="2.0",
 )
 
 
@@ -25,7 +40,15 @@ class PedidoComparacao(BaseModel):
     ano: int = 2023
 
 
-# troca os vazios por None, porque o json nao aceita o NaN do pandas
+# formato do pedido da rota que usa o modelo de linguagem
+class PedidoDeTexto(BaseModel):
+    texto: str = Field(min_length=1, description="Texto em portugues que sera analisado.")
+    tipo_analise: str = Field("resumo", description="Hoje so existe resumo.")
+
+
+# troca os vazios por None, porque o json nao aceita o NaN do pandas, e
+# converte os numeros do numpy em numeros comuns do python, porque os
+# Response Models do Pydantic nao reconhecem os tipos do numpy
 def limpar(tabela):
     registros = tabela.to_dict(orient="records")
     limpos = []
@@ -35,13 +58,49 @@ def limpar(tabela):
             valor = registro[chave]
             if pd.isna(valor):
                 novo[chave] = None
+            elif hasattr(valor, "item"):
+                novo[chave] = valor.item()
             else:
                 novo[chave] = valor
         limpos.append(novo)
     return limpos
 
 
-@app.get("/")
+# ------------------------------------------------------------------
+# Tratamento global de erros
+# ------------------------------------------------------------------
+#
+# Os dois tratadores abaixo valem para a API inteira. O primeiro garante
+# que TODO erro previsto saia no mesmo formato, e traduz a mensagem padrao
+# do FastAPI quando alguem chama uma rota que nao existe. O segundo e uma
+# rede de seguranca: se algum erro que eu nao previ acontecer, o cliente
+# recebe um JSON explicando, e nao uma pagina de erro do servidor.
+
+
+@app.exception_handler(ExcecaoHTTPdoStarlette)
+def tratar_erro_http(requisicao, excecao):
+    """Deixa todo erro previsto no mesmo formato: {"detail": "..."}."""
+    mensagem = excecao.detail
+
+    if excecao.status_code == 404 and mensagem == "Not Found":
+        mensagem = "Rota não encontrada. Veja as rotas disponíveis em / ou em /docs."
+
+    if excecao.status_code == 405:
+        mensagem = "Método HTTP errado para esta rota. Confira em /docs se ela é GET ou POST."
+
+    return JSONResponse(status_code=excecao.status_code, content={"detail": mensagem})
+
+
+@app.exception_handler(Exception)
+def tratar_erro_inesperado(requisicao, excecao):
+    """Rede de seguranca para qualquer erro que eu nao previ."""
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Erro interno inesperado na API. Detalhe: " + str(excecao)},
+    )
+
+
+@app.get("/", response_model=RespostaRaiz)
 def raiz():
     """Mostra o que a API faz e quais rotas existem."""
     return {
@@ -55,12 +114,18 @@ def raiz():
             "GET /brasil": "resumo da concentração econômica do Brasil, ano a ano",
             "GET /noticias": "notícias do IBGE extraídas da web",
             "POST /comparar": "compara vários municípios de uma vez",
+            "POST /processar_texto": "resume um texto em português com o modelo de linguagem local",
+            "GET /modelo": "situação do modelo de linguagem (carregado ou não)",
             "GET /docs": "documentação interativa das rotas",
         },
     }
 
 
-@app.get("/municipios/{codigo}")
+@app.get(
+    "/municipios/{codigo}",
+    response_model=RespostaMunicipio,
+    responses={404: {"model": RespostaDeErro, "description": "Município ou ano não encontrado"}},
+)
 def consultar_municipio(codigo: int, ano: int = None):
     """Devolve os indicadores de um município. Sem o ano, devolve a série toda."""
     do_municipio = indicadores[indicadores["codigo"] == codigo]
@@ -85,7 +150,14 @@ def consultar_municipio(codigo: int, ano: int = None):
     }
 
 
-@app.get("/ranking")
+@app.get(
+    "/ranking",
+    response_model=RespostaRanking,
+    responses={
+        400: {"model": RespostaDeErro, "description": "Critério inválido"},
+        404: {"model": RespostaDeErro, "description": "Ano ou estado não encontrado"},
+    },
+)
 def consultar_ranking(
     ano: int = 2023,
     uf: str = None,
@@ -122,7 +194,11 @@ def consultar_ranking(
     }
 
 
-@app.get("/brasil")
+@app.get(
+    "/brasil",
+    response_model=RespostaBrasil,
+    responses={404: {"model": RespostaDeErro, "description": "Ano não encontrado"}},
+)
 def consultar_brasil(ano: int = None):
     """Devolve o resumo da concentração econômica do Brasil, ano a ano."""
     recorte = resumo
@@ -133,9 +209,17 @@ def consultar_brasil(ano: int = None):
     return {"quantidade": len(recorte), "dados": limpar(recorte)}
 
 
-@app.get("/noticias")
+@app.get(
+    "/noticias",
+    response_model=RespostaNoticias,
+    responses={404: {"model": RespostaDeErro, "description": "Nenhuma notícia nesse ano"}},
+)
 def consultar_noticias(ano: str = None, com_texto: bool = False):
-    """Devolve as notícias do IBGE extraídas da web."""
+    """Devolve as notícias do IBGE extraídas da web.
+
+    Com com_texto=false o campo texto vem vazio, para a resposta não ficar
+    enorme. O campo continua existindo, para o formato ser sempre o mesmo.
+    """
     recorte = noticias.copy()
     if ano is not None:
         recorte = recorte[recorte["data"].str[0:4] == ano]
@@ -152,7 +236,14 @@ def consultar_noticias(ano: str = None, com_texto: bool = False):
     }
 
 
-@app.post("/comparar")
+@app.post(
+    "/comparar",
+    response_model=RespostaComparacao,
+    responses={
+        400: {"model": RespostaDeErro, "description": "Lista de códigos vazia ou grande demais"},
+        404: {"model": RespostaDeErro, "description": "Ano não encontrado"},
+    },
+)
 def comparar_municipios(pedido: PedidoComparacao):
     """Recebe uma lista de códigos IBGE e devolve os indicadores de todos no mesmo ano."""
     if len(pedido.codigos) == 0:
@@ -180,4 +271,86 @@ def comparar_municipios(pedido: PedidoComparacao):
         "encontrados": len(encontrados),
         "nao_encontrados": nao_encontrados,
         "dados": limpar(encontrados[colunas]),
+    }
+
+
+# ------------------------------------------------------------------
+# Rotas do modelo de linguagem (TP4)
+# ------------------------------------------------------------------
+
+
+@app.get("/modelo", response_model=RespostaDoModelo)
+def consultar_modelo():
+    """Informa a situação do modelo de linguagem, sem carregá-lo."""
+    return modelo_llm.situacao()
+
+
+@app.post(
+    "/processar_texto",
+    response_model=RespostaDoTextoProcessado,
+    responses={
+        400: {"model": RespostaDeErro, "description": "Texto curto demais ou tipo de análise não suportado"},
+        413: {"model": RespostaDeErro, "description": "Texto grande demais"},
+        429: {"model": RespostaDeErro, "description": "O modelo já está gerando outro resumo"},
+        500: {"model": RespostaDeErro, "description": "O modelo falhou durante a geração"},
+        503: {"model": RespostaDeErro, "description": "O modelo de linguagem não pôde ser carregado"},
+    },
+)
+def processar_texto(pedido: PedidoDeTexto):
+    """Recebe um texto em português e devolve o resumo feito pelo modelo local.
+
+    Na primeira chamada o modelo é carregado na memória, o que leva cerca de
+    13 segundos. As chamadas seguintes respondem em poucos segundos.
+    """
+    analises_suportadas = ["resumo"]
+    if pedido.tipo_analise not in analises_suportadas:
+        raise HTTPException(
+            status_code=400,
+            detail="Tipo de análise não suportado. Por enquanto a API faz apenas: " + ", ".join(analises_suportadas),
+        )
+
+    texto = pedido.texto.strip()
+
+    if len(texto) < 200:
+        raise HTTPException(
+            status_code=400,
+            detail="Texto curto demais para resumir. Mande pelo menos 200 caracteres, você mandou " + str(len(texto)) + ".",
+        )
+
+    if len(texto) > 50000:
+        raise HTTPException(
+            status_code=413,
+            detail="Texto grande demais. O limite é de 50.000 caracteres e você mandou " + str(len(texto)) + ".",
+        )
+
+    carregou = modelo_llm.carregar()
+    if carregou is False:
+        raise HTTPException(
+            status_code=503,
+            detail="O modelo de linguagem não está disponível no momento. " + modelo_llm.situacao()["mensagem_do_erro"],
+        )
+
+    try:
+        saida = modelo_llm.resumir(texto)
+    except modelo_llm.ModeloOcupado:
+        raise HTTPException(
+            status_code=429,
+            detail="O modelo está ocupado gerando outro resumo. Espere alguns segundos e tente de novo.",
+        )
+    except Exception as erro:
+        raise HTTPException(
+            status_code=500,
+            detail="O modelo foi carregado mas falhou ao gerar o resumo. Detalhe: " + str(erro),
+        )
+
+    return {
+        "tipo_analise": "resumo",
+        "modelo": modelo_llm.nome_do_modelo,
+        "dispositivo": modelo_llm.dispositivo,
+        "caracteres_recebidos": len(texto),
+        "pedacos_do_texto": saida["pedacos_do_texto"],
+        "pedacos_lidos": saida["pedacos_lidos"],
+        "texto_cortado": saida["texto_cortado"],
+        "segundos": saida["segundos"],
+        "resultado": saida["resumo"],
     }
