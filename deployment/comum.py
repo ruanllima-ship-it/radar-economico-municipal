@@ -170,6 +170,10 @@ def desenhar_filtros():
         st.session_state["ano"] = lista_anos[0]
     posicao = lista_anos.index(st.session_state["ano"])
     ano = st.sidebar.selectbox("Ano", lista_anos, index=posicao)
+    # o int() aqui nao e enfeite. o ano sai do pandas como numpy.int64, e o
+    # json nao sabe converter esse tipo. quando uma pagina manda o ano num
+    # POST para a API, o pedido quebra antes de sair do painel.
+    ano = int(ano)
     st.session_state["ano"] = ano
 
     # estado
@@ -207,7 +211,9 @@ def desenhar_filtros():
 
     municipio_escolhido = st.sidebar.selectbox("Município", opcoes_municipio, index=posicao)
     st.session_state["municipio"] = municipio_escolhido
-    st.session_state["codigo"] = codigo_da_opcao[municipio_escolhido]
+    # mesmo motivo do ano: o codigo tambem vem do pandas e precisa virar
+    # um numero comum do Python antes de entrar num JSON.
+    st.session_state["codigo"] = int(codigo_da_opcao[municipio_escolhido])
 
     # contando quantos municipios diferentes a pessoa consultou nesta sessao
     if st.session_state["ultimo_municipio"] != municipio_escolhido:

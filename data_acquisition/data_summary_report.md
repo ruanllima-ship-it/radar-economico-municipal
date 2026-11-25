@@ -2,7 +2,7 @@
 
 Projeto de Bloco: Inteligência Artificial Aplicada — Ciência de Dados
 Aluno: Ruan Luiz Fernandes da Silva Lima
-Versão: TP3 (revisão da versão entregue no TP2)
+Versão: TP5 (revisão das versões entregues no TP2, TP3 e TP4)
 
 ## 1. Visão geral
 
@@ -117,3 +117,163 @@ As bases numéricas seguem a estrutura do TDSP: os dados brutos ficam em data_ac
 ## 10. Caminho para o uso de LLM
 
 O conteúdo textual coletado (19.996 palavras em 15 matérias oficiais) e a base numérica tratada são as duas entradas previstas para as funcionalidades de IA generativa do TP4. O planejamento está em business_understanding/planejamento_llm.md.
+
+
+---
+
+# Atualização para o TP4 e o TP5
+
+Versão: TP5 (revisão das versões entregues no TP2, TP3 e TP4)
+
+As seções de 1 a 10 acima descrevem os dados como estavam ao final do TP3. Esta
+parte registra como esses mesmos dados — os coletados por API e os coletados por
+raspagem — passaram a alimentar as funcionalidades de inteligência artificial.
+
+## 11. As duas entradas e os dois usos de IA
+
+O projeto tem duas origens de dado, e cada uma alimenta uma funcionalidade de IA
+diferente. Nenhuma das duas gerou coleta nova: os TPs 4 e 5 usam exatamente os
+arquivos já descritos acima.
+
+| Origem | Coletado com | Arquivo | Usado por |
+|---|---|---|---|
+| Texto das notícias do IBGE | Selenium + Beautiful Soup | `data/noticias_ibge.csv` (15 matérias, 19.996 palavras) | Resumo automático (TP4) |
+| Indicadores municipais | API do SIDRA | `data_acquisition/cleaned_data/indicadores_municipios.csv` (77.980 linhas) | Agente de diagnóstico (TP5) |
+
+Essa simetria não foi planejada no TP2, mas se mostrou útil: o dado de **texto**
+alimenta a tarefa de texto, e o dado **numérico** alimenta a tarefa de análise.
+
+## 12. O dado de raspagem no TP4: resumo automático
+
+As 15 matérias coletadas com Selenium são a entrada da página **Resumo com IA**
+e da rota `POST /processar_texto`.
+
+O usuário escolhe uma das matérias já coletadas, ou cola um texto próprio, e o
+modelo `recogna-nlp/ptt5-base-summ` devolve um resumo. O modelo lê no máximo 512
+pedaços por vez, e a resposta da API informa quantos pedaços o texto tinha,
+quantos foram lidos e se houve corte — o campo `texto_cortado` existe justamente
+para que o usuário não receba um resumo parcial achando que é do texto inteiro.
+
+As matérias têm entre 466 e 2.019 palavras, com média de 1.333. A maioria
+ultrapassa o limite de 512 pedaços, e isso fica declarado na resposta.
+
+A configuração de geração foi escolhida por experimento, registrado em
+`modeling/afina_resumo.py`: foram comparadas duas configurações de busca em
+feixe (`num_beams`), tamanho mínimo e máximo e penalidade de comprimento, e a
+configuração B foi adotada.
+
+## 13. O dado de API no TP5: análise e diagnóstico
+
+A base tratada de 77.980 linhas é a entrada do agente. O caminho completo de um
+diagnóstico é este:
+
+1. O usuário escolhe município e ano na barra lateral do painel.
+2. A página chama `GET /analise/{codigo}` na API do projeto.
+3. A API chama `agente.montar_analise()`, que **lê o CSV tratado**, recorta o
+   ano pedido, calcula os percentis 25, 50, 75 e 90 da distribuição nacional
+   **daquele ano** e classifica o município nessas faixas.
+4. As regras de decisão produzem três listas: achados, alertas e o que
+   acompanhar.
+5. A página mostra tudo isso na hora, com gráficos, sem IA nenhuma.
+6. Se o usuário clicar no botão, a página chama `POST /diagnostico`, que refaz a
+   análise e a entrega ao modelo `Qwen/Qwen2.5-1.5B-Instruct`, que escreve três
+   parágrafos.
+
+O ponto importante é o passo 3: **os percentis não são constantes gravadas no
+código**. Eles são recalculados a cada consulta, a partir de todos os municípios
+com dado naquele ano. Dizer que a dependência de um município é "muito alta"
+significa que ele está entre os 10% mais dependentes do Brasil **naquele ano**,
+e não que ele passou de um limite que eu escolhi.
+
+### Quais colunas o agente usa
+
+| Coluna do CSV | Para quê |
+|---|---|
+| `razao_riqueza` | faixa de riqueza, trajetória 2010–2023 e o achado principal |
+| `dependencia_adm` | faixa de dependência pública e o alerta de repasses |
+| `hhi` | faixa de concentração setorial |
+| `perfil` | distinguir concentração em serviços de concentração industrial |
+| `part_agropecuaria`, `part_industria`, `part_servicos`, `part_adm_publica` | gráfico de composição e soma dos setores privados |
+| `pib`, `populacao`, `pib_per_capita`, `pib_per_capita_brasil` | números de cabeçalho |
+| `posicao_pib` | posição no ranking nacional |
+| `uf`, `regiao`, `capital`, `municipio` | identificação e nome do estado por extenso |
+
+A soma dos setores privados é calculada no `agente.py` e entregue pronta ao
+modelo. Isso é deliberado: nos primeiros testes o modelo somava os percentuais
+por conta própria e errava, desobedecendo à ordem de não calcular. Tirando a
+conta das mãos dele, o erro deixa de ser possível.
+
+### A limitação de 2022 e 2023 no agente
+
+Como o IBGE publicou 2022 e 2023 sem abertura setorial, o agente detecta a
+ausência (`tem_dados_setoriais`) e faz a análise sem a parte setorial. O painel
+avisa em caixa azul e sugere 2021. A API devolve `tem_dados_setoriais: false` e
+um dicionário de faixas menor. O prompt enviado ao modelo também muda: em vez do
+setor predominante, vai uma observação explicando que o dado não existe naquele
+ano. Nenhuma das três camadas quebra.
+
+## 14. Um defeito de dado descoberto no TP5
+
+Os testes com municípios ricos revelaram um problema que não era do modelo nem
+do prompt, mas da **frase que a análise escrevia**. O achado era:
+
+> "A administração pública responde por 6,1% da economia local, contra uma
+> mediana nacional de 26,8%."
+
+Dois números no mesmo período, sem nenhuma palavra indicando a direção. Com
+Uiramutã (83,5% contra 26,8%) o modelo acertava, porque a diferença é gritante.
+Com Sorriso e São Paulo ele **inverteu**, escrevendo "forte dependência da
+administração pública" sobre o município de menor dependência.
+
+A correção foi no `agente.py`:
+
+> "A administração pública responde por 6,1% da economia deste município.
+> Isso é MENOS que a mediana nacional, que é de 26,8%."
+
+O caso ficou registrado porque é uma lição sobre dado, e não sobre modelo:
+**quando o dado sai da análise ambíguo, nenhuma instrução de prompt conserta.**
+A mesma lógica levou a reescrever a frase dos setores privados, deixando
+explícito que 92,7% é soma de três setores e não a participação de um.
+
+## 15. Como os dados são servidos ao final do TP5
+
+A **API em FastAPI** tem 12 rotas e 25 Response Models. As quatro novas do TP5
+são: `GET /analise/{codigo}` (análise por regras, sem IA, resposta imediata),
+`POST /diagnostico` (análise mais texto gerado), `GET /modelo_diagnostico`
+(situação do modelo sem carregá-lo) e `POST /modelo_diagnostico/descarregar`
+(libera os 2,9 GB da memória).
+
+O **painel em Streamlit** tem 9 páginas: Visão geral, Município, Ranking,
+Comparação, Notícias do IBGE, Resumo com IA, Diagnóstico com IA, Seus dados e
+Consulta pela API.
+
+Nenhuma das duas saídas consulta a internet em tempo de uso, e nenhum dado sai
+da máquina em que o projeto roda.
+
+## 16. Verificação automática do estado dos dados e do código
+
+O arquivo `modeling/verifica_tp5.py` confere o projeto inteiro em 38 testes
+automáticos: se os arquivos existem, se importam sem erro, se o agente consegue
+analisar um município real do CSV, se os números de contagem vêm sem casa
+decimal, se a API tem as rotas e os schemas esperados e se as bibliotecas estão
+instaladas. Ele só lê, nunca escreve.
+
+O arquivo foi escrito depois de um desligamento forçado da máquina ter
+corrompido o ambiente, e passou a ser o primeiro comando rodado a cada sessão de
+trabalho.
+
+## 17. Limitações acrescentadas no TP5
+
+Às limitações da seção 8 somam-se:
+
+1. **A análise setorial não existe para 2022 e 2023**, e é ela que carrega os
+   alertas mais relevantes. A análise desses anos fica reduzida à riqueza e à
+   trajetória.
+2. **O diagnóstico escrito leva de 3,5 a 5 minutos** na máquina de
+   desenvolvimento, porque o modelo roda em CPU.
+3. **O texto gerado tem deslizes de redação** conhecidos e documentados em
+   `modeling/engenharia_de_prompt.md`. Nenhum deles afeta um número, e a
+   conferência está disponível ao leitor pelo prompt devolvido junto.
+4. **O agente analisa um município por vez.** Não há comparação entre
+   municípios dentro do diagnóstico — para isso continua existindo a página de
+   Comparação e a rota `POST /comparar`.

@@ -12,6 +12,8 @@ from starlette.exceptions import HTTPException as ExcecaoHTTPdoStarlette
 # o comando foi dado.
 try:
     from deployment import modelo_llm
+    from deployment import agente
+    from deployment import diagnostico_llm
     from deployment.respostas import (
         RespostaRaiz,
         RespostaMunicipio,
@@ -21,10 +23,16 @@ try:
         RespostaComparacao,
         RespostaDoTextoProcessado,
         RespostaDoModelo,
+        RespostaDaAnalise,
+        RespostaDoDiagnostico,
+        RespostaDoModeloDeDiagnostico,
+        RespostaSimples,
         RespostaDeErro,
     )
 except ImportError:
     import modelo_llm
+    import agente
+    import diagnostico_llm
     from respostas import (
         RespostaRaiz,
         RespostaMunicipio,
@@ -34,6 +42,10 @@ except ImportError:
         RespostaComparacao,
         RespostaDoTextoProcessado,
         RespostaDoModelo,
+        RespostaDaAnalise,
+        RespostaDoDiagnostico,
+        RespostaDoModeloDeDiagnostico,
+        RespostaSimples,
         RespostaDeErro,
     )
 
@@ -44,7 +56,7 @@ except ImportError:
 app = FastAPI(
     title="API do Radar Econômico Municipal",
     description="Consulta dos indicadores de concentração econômica dos municípios brasileiros, calculados a partir do PIB dos Municípios do IBGE (tabela 5938 do SIDRA) e das notícias da Agência de Notícias do IBGE.",
-    version="2.0",
+    version="3.0",
 )
 
 
@@ -74,6 +86,12 @@ class PedidoComparacao(BaseModel):
 class PedidoDeTexto(BaseModel):
     texto: str = Field(min_length=1, description="Texto em portugues que sera analisado.")
     tipo_analise: str = Field("resumo", description="Hoje so existe resumo.")
+
+
+# formato do pedido da rota do agente de diagnostico
+class PedidoDeDiagnostico(BaseModel):
+    codigo: int = Field(description="Codigo IBGE do municipio, com 7 digitos.")
+    ano: int = Field(2021, description="2021 e o ultimo ano com dados por setor.")
 
 
 # troca os vazios por None, porque o json nao aceita o NaN do pandas, e
@@ -145,7 +163,10 @@ def raiz():
             "GET /noticias": "notícias do IBGE extraídas da web",
             "POST /comparar": "compara vários municípios de uma vez",
             "POST /processar_texto": "resume um texto em português com o modelo de linguagem local",
-            "GET /modelo": "situação do modelo de linguagem (carregado ou não)",
+            "GET /modelo": "situação do modelo de linguagem que resume textos",
+            "GET /analise/{codigo}": "análise econômica do município feita por regras, sem IA",
+            "POST /diagnostico": "diagnóstico do município escrito pelo agente com IA local",
+            "GET /modelo_diagnostico": "situação do modelo que escreve os diagnósticos",
             "GET /docs": "documentação interativa das rotas",
         },
     }
@@ -383,4 +404,109 @@ def processar_texto(pedido: PedidoDeTexto):
         "texto_cortado": saida["texto_cortado"],
         "segundos": saida["segundos"],
         "resultado": saida["resumo"],
+    }
+
+
+# ------------------------------------------------------------------
+# Rotas do agente de diagnostico municipal (TP5)
+# ------------------------------------------------------------------
+#
+# Sao duas rotas de proposito. A GET /analise devolve a analise feita por
+# regras em Python, na hora, sem tocar no modelo de linguagem. A POST
+# /diagnostico devolve a mesma analise MAIS o texto escrito pelo modelo.
+#
+# Quem quiser so os numeros e os alertas nao precisa esperar o modelo nem
+# gastar memoria com ele.
+
+
+@app.get(
+    "/analise/{codigo}",
+    response_model=RespostaDaAnalise,
+    responses={404: {"model": RespostaDeErro, "description": "Município ou ano não encontrado"}},
+)
+def consultar_analise(codigo: int, ano: int = 2021):
+    """Devolve a análise econômica do município, feita por regras, sem IA.
+
+    Responde na hora: não carrega modelo nenhum e não usa memória extra.
+    """
+    analise = agente.montar_analise(indicadores, codigo, ano)
+    if analise is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Não encontrei esse município nesse ano. Use o código IBGE de 7 dígitos.",
+        )
+    return {"analise": analise}
+
+
+@app.get("/modelo_diagnostico", response_model=RespostaDoModeloDeDiagnostico)
+def consultar_modelo_diagnostico():
+    """Informa a situação do modelo que escreve os diagnósticos, sem carregá-lo."""
+    return diagnostico_llm.situacao()
+
+
+@app.post("/modelo_diagnostico/descarregar", response_model=RespostaSimples)
+def descarregar_modelo_diagnostico():
+    """Tira o modelo de diagnóstico da memória.
+
+    Existe porque o modelo ocupa cerca de 2,9 GB e a máquina de
+    desenvolvimento tem 15,7 GB no total. Depois de gerar os diagnósticos,
+    descarregar devolve essa memória sem precisar reiniciar a API.
+    """
+    diagnostico_llm.descarregar()
+    return {"ok": True, "mensagem": "Modelo de diagnóstico retirado da memória."}
+
+
+@app.post(
+    "/diagnostico",
+    response_model=RespostaDoDiagnostico,
+    responses={
+        404: {"model": RespostaDeErro, "description": "Município ou ano não encontrado"},
+        429: {"model": RespostaDeErro, "description": "O modelo já está escrevendo outro diagnóstico"},
+        500: {"model": RespostaDeErro, "description": "O modelo falhou ao escrever"},
+        503: {"model": RespostaDeErro, "description": "O modelo de linguagem não pôde ser carregado"},
+    },
+)
+def gerar_diagnostico_do_municipio(pedido: PedidoDeDiagnostico):
+    """Devolve a análise do município e o diagnóstico escrito pelo modelo local.
+
+    A primeira chamada carrega o modelo, o que leva cerca de 10 segundos.
+    Escrever o texto leva de 40 a 60 segundos, porque o modelo roda em CPU.
+    """
+    analise = agente.montar_analise(indicadores, pedido.codigo, pedido.ano)
+    if analise is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Não encontrei esse município nesse ano. Use o código IBGE de 7 dígitos.",
+        )
+
+    carregou = diagnostico_llm.carregar()
+    if carregou is False:
+        raise HTTPException(
+            status_code=503,
+            detail="O modelo de linguagem não está disponível no momento. "
+            + diagnostico_llm.situacao()["mensagem_do_erro"],
+        )
+
+    try:
+        saida = diagnostico_llm.gerar_diagnostico(analise)
+    except diagnostico_llm.ModeloOcupado:
+        raise HTTPException(
+            status_code=429,
+            detail="O modelo está ocupado escrevendo outro diagnóstico. Espere e tente de novo.",
+        )
+    except Exception as erro:
+        raise HTTPException(
+            status_code=500,
+            detail="O modelo foi carregado mas falhou ao escrever o diagnóstico. Detalhe: " + str(erro),
+        )
+
+    return {
+        "analise": analise,
+        "texto": saida["texto"],
+        "modelo": diagnostico_llm.nome_do_modelo,
+        "dispositivo": diagnostico_llm.dispositivo,
+        "segundos": saida["segundos"],
+        "pedacos_do_prompt": saida["pedacos_do_prompt"],
+        "pedacos_gerados": saida["pedacos_gerados"],
+        "prompt_enviado": saida["prompt_enviado"],
     }

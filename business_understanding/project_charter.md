@@ -2,7 +2,7 @@
 
 Projeto de Bloco: Inteligência Artificial Aplicada — Ciência de Dados
 Aluno: Ruan Luiz Fernandes da Silva Lima
-Versão: TP3 (revisão da versão entregue no TP2)
+Versão: TP5 (revisão das versões entregues no TP2, TP3 e TP4)
 Repositório: https://github.com/ruanllima-ship-it/radar-economico-municipal
 
 ## 1. Contexto e problema de negócio
@@ -98,3 +98,205 @@ A solução tem quatro camadas. A **coleta** reúne os scripts que buscam os dad
 O projeto segue o CRISP-DM como raciocínio analítico e o TDSP como estrutura de pastas e artefatos.
 
 O TP1 cobriu o entendimento do negócio. O TP2 cobriu o controle de versão, a coleta completa das bases, a raspagem das notícias, o cálculo e a validação dos indicadores, o painel interativo e a documentação. O TP3 cobriu a automação da coleta com Selenium, a construção da API em FastAPI, a reorganização do painel em múltiplas páginas, a integração do painel com a API e a revisão desta documentação. O TP4 vai introduzir recursos de IA via LLM, conforme o planejamento descrito em business_understanding/planejamento_llm.md.
+
+
+---
+
+# Atualização para o TP4 e o TP5
+
+Versão: TP5 (revisão das versões entregues no TP2, TP3 e TP4)
+
+As seções de 1 a 12 acima descrevem o projeto como ele estava ao final do TP3.
+Esta parte registra o que mudou com a entrada da inteligência artificial
+generativa, no TP4, e do agente de diagnóstico, no TP5.
+
+## 13. Reavaliação do problema de negócio
+
+O problema continua o mesmo desde o TP1: a informação sobre a economia dos
+municípios é pública, mas inacessível para quem precisaria dela. O que mudou foi
+o entendimento de **onde** a inacessibilidade mora.
+
+Até o TP3, a resposta era "os dados estão em tabelas difíceis", e a solução foi
+calcular indicadores e mostrá-los em gráficos. Os TPs 4 e 5 mostraram que isso
+resolve metade do problema. Um prefeito de cidade pequena, olhando a página do
+município, vê que a dependência da administração pública é de 83,5% e que o HHI
+é alto — e continua sem saber **o que fazer com isso**. O número está na tela,
+mas a leitura do número continua exigindo alguém que saiba lê-lo.
+
+É essa segunda metade que a IA generativa resolve neste projeto. Ela não produz
+dado novo e não calcula nada: ela traduz para português o que a análise já
+concluiu.
+
+## 14. O que foi construído no TP4 e no TP5
+
+| Etapa | Funcionalidade | Modelo | Entrada |
+|---|---|---|---|
+| TP4 | Resumo automático de texto | `recogna-nlp/ptt5-base-summ` (222,9 milhões de parâmetros) | as 15 matérias do IBGE coletadas por Selenium (19.996 palavras) |
+| TP5 | Agente de diagnóstico municipal | `Qwen/Qwen2.5-1.5B-Instruct` (1,54 bilhão de parâmetros) | a base tratada de 77.980 linhas, pela análise do `agente.py` |
+
+Os dois modelos rodam **localmente**, baixados da HuggingFace, sem chave de API
+e sem enviar nenhum dado para fora da máquina. Essa decisão foi tomada no TP5,
+depois de considerar uma API online: com chave, o professor não conseguiria
+executar o projeto, a chave não poderia ficar num repositório público, e o
+projeto deixaria de ser reprodutível. O risco de exposição de chave já estava
+registrado em `business_understanding/planejamento_llm.md` desde o TP3.
+
+## 15. Como dados, IA e engenharia de prompt se encaixam no problema
+
+As três coisas resolvem partes diferentes do mesmo problema, e a ordem importa.
+
+**Os dados** — coletados por API do SIDRA e por raspagem com Selenium — dão a
+base factual. Sem eles não há o que dizer. São 77.980 linhas de indicadores
+calculados e 19.996 palavras de texto oficial do IBGE, tudo reconstruível do
+zero por script.
+
+**A análise em Python** — `deployment/agente.py` — transforma dado em conclusão.
+Ela classifica o município por percentil contra a distribuição nacional **do
+ano**, calculada na hora, e aplica regras de decisão que produzem três listas:
+achados (fatos), alertas (riscos) e o que acompanhar. Esta camada não usa IA, e
+é ela que carrega todo o juízo técnico do projeto.
+
+**O modelo de linguagem** entra por último e com a menor responsabilidade
+possível: transformar a análise pronta em três parágrafos que um vereador leia
+sem intérprete. Ele tem ordem expressa de não calcular e não concluir nada.
+
+**A engenharia de prompt** é o que torna essa divisão confiável na prática. As
+oito versões documentadas em `modeling/engenharia_de_prompt.md` mostram que a
+divisão sozinha não basta: mesmo proibido de analisar, o modelo tentava deduzir,
+inventava pontos positivos e invertia comparações. Cada versão do prompt corrige
+um desses desvios, e duas delas foram corrigidas **fora do prompt** — uma no
+código de limpeza e outra na própria frase que a análise escreve.
+
+O alinhamento com o problema de negócio é direto: o usuário-alvo é quem **não
+tem equipe de dados**. Para ele, um parágrafo em português vale mais que um
+gráfico, desde que o parágrafo seja verdadeiro. Todo o esforço de engenharia
+deste TP é para garantir essa segunda parte.
+
+## 16. A transparência como requisito de projeto
+
+Entregar texto gerado por máquina a um gestor público cria uma obrigação: ele
+precisa poder conferir. O projeto trata isso como requisito, não como aviso
+legal.
+
+1. **A análise aparece antes da IA.** A página mostra os números, as faixas, os
+   gráficos e as três listas assim que abre, sem carregar modelo nenhum. O botão
+   da IA fica abaixo de tudo isso.
+2. **A rota `GET /analise/{codigo}` existe separada.** Quem quiser só os
+   insights não precisa do modelo nem espera por ele.
+3. **O prompt enviado é devolvido junto com o texto.** O campo `prompt_enviado`
+   da API e o expander "Ver o prompt exato que foi enviado ao modelo" mostram o
+   texto integral. Qualquer número do diagnóstico que não esteja ali foi
+   inventado pelo modelo, e isso é verificável por qualquer pessoa.
+4. **O painel avisa que o texto é escrito por máquina**, em destaque, acima do
+   botão.
+
+## 17. Enquadramento ESG e ODS (revisado no TP5)
+
+O enquadramento da seção 8 continua válido e ganha uma camada com o agente.
+
+### Pilar Social
+
+O projeto mede e expõe a desigualdade econômica entre territórios. O indicador
+central é a razão de riqueza, que divide o PIB por habitante do município pelo
+do Brasil. Uiramutã (RR) tem 0,31; Paulínia (SP) tem 10,83. São **35 vezes de
+distância** entre dois municípios do mesmo país, e o painel mostra isso em um
+gráfico que qualquer pessoa entende.
+
+O agente acrescenta a leitura dessa desigualdade em linguagem comum. Um
+município com 83,5% da economia na administração pública não é apenas pobre: ele
+é **frágil**, porque qualquer mudança no repasse federal muda a vida de todo
+mundo ali. Essa é uma conclusão social, e agora ela sai escrita.
+
+### Pilar Governança
+
+Três decisões do projeto são de governança:
+
+- **Reprodutibilidade.** Toda a base é reconstruível do zero por script, sem
+  passo manual, e o `modeling/verifica_tp5.py` confere o estado do projeto em 38
+  testes automáticos.
+- **Auditabilidade do texto gerado.** O prompt vai junto com a resposta.
+- **Dado local.** Nenhuma informação sai da máquina de quem roda o projeto.
+
+### ODS atendidos
+
+**ODS 8 — Trabalho decente e crescimento econômico.** A meta 8.2 pede
+diversificação econômica. O índice HHI e o perfil econômico medem exatamente
+isso, e o agente transforma a medição em alerta quando a concentração é alta —
+com a ressalva, construída no TP5, de que concentração em serviços não é o mesmo
+risco que concentração numa única indústria.
+
+**ODS 10 — Redução das desigualdades.** A meta 10.1 trata do crescimento da
+renda dos 40% mais pobres acima da média nacional. A razão de riqueza ao longo
+de 14 anos é uma leitura territorial direta dessa meta: o painel mostra se o
+município está se aproximando ou se afastando da média do país. Uiramutã saiu de
+0,32 em 2010 para 0,34 em 2023 — praticamente parado. Sorriso (MT) saiu de 1,35
+para 2,31. A desigualdade entre municípios não está se fechando sozinha.
+
+**ODS 11 — Cidades e comunidades sustentáveis.** A meta 11.a trata do
+planejamento regional integrado. A API existe para isso: os indicadores podem
+ser consumidos por sistemas de prefeituras, consórcios e universidades sem
+passar pela interface.
+
+**ODS 16 — Paz, justiça e instituições eficazes.** A meta 16.6 pede instituições
+transparentes. Dar a um vereador a base econômica do próprio município em
+linguagem acessível, com a fonte e o prompt à vista, é contribuição direta a
+essa meta.
+
+### O que o projeto **não** faz
+
+Honestidade sobre o alcance faz parte do enquadramento ESG. O projeto não mede
+emprego, renda domiciliar, informalidade, pobreza nem impacto ambiental. Ele
+mede concentração econômica a partir do PIB, e PIB alto não significa população
+rica — Saquarema (RJ) tem PIB por habitante 13,4 vezes a média nacional por
+causa do petróleo, sem que essa riqueza fique com os moradores. O painel avisa
+isso quando a razão de riqueza passa de 3. Nenhuma conclusão sobre bem-estar
+pode ser tirada só destes indicadores.
+
+## 18. Metas acrescentadas no TP4 e no TP5
+
+| Meta | Situação |
+|---|---|
+| Executar IA generativa localmente, sem chave e sem enviar dado para fora | Cumprida: dois modelos locais |
+| O modelo nunca produzir número que não esteja na análise | Cumprida e verificável pelo `prompt_enviado` |
+| A análise funcionar sem o modelo | Cumprida: `GET /analise` responde na hora |
+| A aplicação subir mesmo sem o PyTorch instalado | Cumprida: imports dentro da função, rota responde 503 |
+| Documentar a evolução do prompt com defeito e correção | Cumprida: 8 versões em `modeling/engenharia_de_prompt.md` |
+| Testar o agente em perfis econômicos opostos | Cumprida: 4 municípios, de 0,31× a 10,83× a riqueza nacional |
+
+## 19. Riscos acrescentados no TP4 e no TP5
+
+| Risco | O que aconteceu | Mitigação adotada |
+|---|---|---|
+| Modelo inventar número | Ocorreu na versão 1 do prompt | Análise feita em Python; prompt proíbe calcular; `prompt_enviado` permite conferência |
+| Modelo inverter uma conclusão | Ocorreu nas versões 6 e 8 | Direção da comparação escrita por extenso no `agente.py`; proibição no fim do pedido |
+| Modelo escrever em outro idioma | Ocorreu: ideograma chinês no teste de Sorriso | Filtro no código, além da regra no prompt |
+| Falta de memória para o modelo | Ocorreu: 0,7 GB livres derrubaram a velocidade para 2,2 pedaços/s | `bfloat16`; carga preguiçosa; rota `POST /modelo_diagnostico/descarregar` |
+| Dois pedidos simultâneos ao modelo | Previsto | Duas travas: uma de carga e uma de uso, com resposta HTTP 429 |
+| Texto gerado ser tomado como verdade oficial | Risco permanente | Aviso em destaque no painel; análise visível antes da IA; prompt à vista |
+
+## 20. Arquitetura ao final do TP5
+
+Cinco camadas:
+
+1. **Coleta** — API do SIDRA (PIB e população) e Selenium com Beautiful Soup
+   (notícias do IBGE).
+2. **Modelagem** — junção, cálculo dos sete indicadores e validação contra os
+   números oficiais.
+3. **Análise** — `deployment/agente.py`, sem IA: percentis calculados na hora e
+   regras de decisão que produzem achados, alertas e o que acompanhar.
+4. **Geração de texto** — `deployment/modelo_llm.py` (resumo, TP4) e
+   `deployment/diagnostico_llm.py` (diagnóstico, TP5), ambos locais e de carga
+   preguiçosa.
+5. **Entrega** — API em FastAPI com 12 rotas e 25 Response Models, e painel em
+   Streamlit com 9 páginas. O painel consome a própria API nas páginas de IA.
+
+## 21. Cronograma atualizado
+
+O TP1 cobriu o entendimento do negócio. O TP2 cobriu versionamento, coleta,
+cálculo, validação, painel e documentação. O TP3 cobriu a automação da coleta
+com Selenium, a API em FastAPI e a integração painel–API. O TP4 introduziu o
+primeiro modelo de linguagem local, com a funcionalidade de resumo de texto,
+tratamento de erros em oito códigos HTTP e Response Models tipados. O TP5
+construiu o agente de diagnóstico municipal: a análise por regras em Python, o
+segundo modelo local para redação, quatro rotas novas na API, a página do painel
+e as oito versões documentadas do prompt.

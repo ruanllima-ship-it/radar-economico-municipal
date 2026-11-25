@@ -13,6 +13,7 @@ paginas = [
     st.Page("paginas/comparacao.py", title="Comparação", icon=":material/compare_arrows:"),
     st.Page("paginas/noticias.py", title="Notícias do IBGE", icon=":material/newspaper:"),
     st.Page("paginas/resumo_llm.py", title="Resumo com IA", icon=":material/summarize:"),
+    st.Page("paginas/diagnostico.py", title="Diagnóstico com IA", icon=":material/psychology:"),
     st.Page("paginas/seus_dados.py", title="Seus dados", icon=":material/upload_file:"),
     st.Page("paginas/consulta_api.py", title="Consulta pela API", icon=":material/api:"),
 ]

@@ -232,3 +232,95 @@ class RespostaDoModelo(BaseModel):
     resumos_gerados: int
     mensagem_do_erro: str
     limite_de_entrada: int
+
+    # ------------------------------------------------------------------
+# Respostas do agente de diagnostico municipal (TP5)
+# ------------------------------------------------------------------
+
+
+class TrajetoriaDoMunicipio(BaseModel):
+    """Como a riqueza do municipio andou do primeiro ao ultimo ano da base."""
+
+    primeiro_ano: int
+    ultimo_ano: int
+    razao_riqueza_no_inicio: float
+    razao_riqueza_no_fim: float
+    sentido: str
+    variacao_percentual: float | None = None
+
+
+class AnaliseDoMunicipio(BaseModel):
+    """A analise feita pelo agente, em Python, sem modelo de linguagem.
+
+    Este e o resultado do arquivo deployment/agente.py: os numeros do
+    municipio, a posicao dele na distribuicao nacional do ano, os fatos
+    apurados pelas regras de decisao, os alertas e o que acompanhar.
+    """
+
+    codigo: int
+    municipio: str
+    uf: str
+    estado: str
+    regiao: str
+    e_capital: bool
+    ano: int
+    perfil: str
+    tem_dados_setoriais: bool
+    numeros: dict[str, int | float | None]
+    faixas: dict[str, str]
+    trajetoria: TrajetoriaDoMunicipio | None = None
+    achados: list[str]
+    alertas: list[str]
+    acompanhar: list[str]
+
+
+class RespostaDaAnalise(BaseModel):
+    """Resposta da rota GET /analise/{codigo}.
+
+    So a analise, sem passar pelo modelo de linguagem. Responde na hora,
+    sem carregar nada na memoria.
+    """
+
+    analise: AnaliseDoMunicipio
+
+
+class RespostaDoDiagnostico(BaseModel):
+    """Resposta da rota POST /diagnostico.
+
+    Traz a analise E o texto escrito pelo modelo a partir dela. O campo
+    prompt_enviado devolve o prompt exato que foi usado, para quem quiser
+    conferir que nenhum numero do texto saiu de fora dele.
+    """
+
+    analise: AnaliseDoMunicipio
+    texto: str
+    modelo: str
+    dispositivo: str
+    segundos: float
+    pedacos_do_prompt: int
+    pedacos_gerados: int
+    prompt_enviado: str
+
+
+class RespostaDoModeloDeDiagnostico(BaseModel):
+    """Resposta da rota GET /modelo_diagnostico.
+
+    Serve para saber se o modelo que escreve os diagnosticos ja esta
+    carregado, sem carrega-lo. O estado pode ser nao_carregado,
+    carregando, pronto ou falhou.
+    """
+
+    modelo: str
+    estado: str
+    dispositivo: str
+    segundos_para_carregar: float
+    diagnosticos_gerados: int
+    mensagem_do_erro: str
+    pedacos_maximos: int
+
+
+class RespostaSimples(BaseModel):
+    """Resposta curta para acoes que so confirmam que deram certo."""
+
+    ok: bool
+    mensagem: str
