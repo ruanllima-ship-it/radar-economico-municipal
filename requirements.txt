@@ -1,53 +1,90 @@
+# requirements.txt — Radar Econômico Municipal
+#
+# Instalação em dois comandos. O primeiro é obrigatório e vem antes:
+#
+#   py -m pip install torch==2.15.0 --index-url https://download.pytorch.org/whl/cpu
+#   py -m pip install -r requirements.txt
+#
+# O torch precisa do índice próprio da versão de CPU. Sem o --index-url, o pip
+# baixa a versão com suporte a GPU, que tem quase 3 GB e não serve numa máquina
+# sem placa de vídeo. O torch está listado aqui também, para que o arquivo
+# descreva o ambiente inteiro, mas se for instalado só por aqui virá a versão
+# errada.
+
+
+# ------------------------------------------------------------------
+# Inteligência artificial — os dois modelos locais
+# ------------------------------------------------------------------
+# torch e transformers executam os modelos; sentencepiece é o tokenizador do
+# ptt5-base-summ (TP4); protobuf é exigido pelo tokenizador do mesmo modelo.
+torch==2.15.0
+transformers==5.22.2
+sentencepiece==0.2.3
+protobuf==7.36.1
+
+
+# ------------------------------------------------------------------
+# Painel — Streamlit
+# ------------------------------------------------------------------
+streamlit==1.62.0
 altair==6.2.2
-anyio==4.14.2
-attrs==26.1.0
+pydeck==0.9.3
+narwhals==2.25.0
+pillow==12.3.0
+wordcloud==1.9.6
+watchdog==6.0.0
 blinker==1.9.0
-certifi==2026.7.22
-charset-normalizer==3.5.1
-click==8.4.2
-colorama==0.4.6
+toml==0.10.2
+
+
+# ------------------------------------------------------------------
+# API — FastAPI e servidor
+# ------------------------------------------------------------------
+fastapi==0.143.3
+uvicorn==0.52.4
+starlette==1.6.0
 h11==0.16.0
 httptools==0.8.0
+websockets==16.1.1
+python-multipart==0.0.32
+anyio==4.14.2
+
+
+# ------------------------------------------------------------------
+# Dados — leitura, cálculo e armazenamento
+# ------------------------------------------------------------------
+pandas==3.0.5
+numpy==2.5.2
+pyarrow==25.0.1
+python-dateutil==2.9.0.post0
+tzdata==2026.3
+
+
+# ------------------------------------------------------------------
+# Coleta — API do SIDRA e raspagem das notícias do IBGE
+# ------------------------------------------------------------------
+requests==2.34.2
+beautifulsoup4==4.15.0
+selenium==4.51.0
+urllib3==2.7.0
+certifi==2026.7.22
+charset-normalizer==3.5.1
 idna==3.19
+
+
+# ------------------------------------------------------------------
+# Dependências indiretas, fixadas para o ambiente ser reproduzível
+# ------------------------------------------------------------------
+attrs==26.1.0
+click==8.4.2
+colorama==0.4.6
 itsdangerous==2.2.0
 Jinja2==3.1.6
 jsonschema==4.26.0
 jsonschema-specifications==2025.9.1
 MarkupSafe==3.0.3
-narwhals==2.25.0
-numpy==2.5.2
 packaging==26.3
-pandas==3.0.5
-pillow==12.3.0
-protobuf==7.36.1
-pyarrow==25.0.1
-pydeck==0.9.3
-python-dateutil==2.9.0.post0
-python-multipart==0.0.32
 referencing==0.37.0
-requests==2.34.2
 rpds-py==2026.6.3
 six==1.17.0
-starlette==1.6.0
-streamlit==1.62.0
-toml==0.10.2
 typing_extensions==4.16.0
-tzdata==2026.3
-urllib3==2.7.0
-uvicorn==0.52.4
-watchdog==6.0.0
-websockets==16.1.1
-beautifulsoup4==4.15.0
-wordcloud==1.9.6
-selenium==4.51.0
-fastapi==0.143.3
-
-# --- TP4: modelo de linguagem local ---
-# O torch precisa ser instalado ANTES dos outros, com o indice da versao de CPU,
-# senao o pip baixa a versao com suporte a GPU, que tem quase 3 GB:
-#
-#   py -m pip install torch==2.15.0 --index-url https://download.pytorch.org/whl/cpu
-#
-torch==2.15.0
-transformers==5.22.2
-sentencepiece==0.2.3
